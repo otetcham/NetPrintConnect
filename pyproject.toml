@@ -1,0 +1,25 @@
+[project]
+name = "netprintconnect"
+version = "0.1.0"
+description = "Headless CLI and MCP server for uploading documents and photos to Japan convenience store printers"
+readme = "README.md"
+authors = [
+    { name = "BrowserOS Build", email = "build@localhost" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "click>=8.5.0",
+    "mcp>=2.3.0",
+    "pillow>=13.0.0",
+    "playwright>=1.64.0",
+    "pydantic>=2.14.1",
+    "qrcode>=8.2",
+    "rich>=15.0.0",
+]
+
+[project.scripts]
+netprintconnect = "netprintconnect:main"
+
+[build-system]
+requires = ["uv_build>=0.12.23,<0.13.0"]
+build-backend = "uv_build"
