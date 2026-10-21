@@ -113,15 +113,39 @@ async def upload_to_networkprint(
         # QRコードの取得（任意）
         qr_path = None
         if save_qr:
-            qr_btn = page.locator("text=QRコードを表示")
-            if await qr_btn.count() > 0 and await qr_btn.first.is_visible():
-                await qr_btn.first.click()
-                await page.wait_for_timeout(800)
-                qr_img = page.locator("img[src*='qr'], img[alt*='QR'], #qrCode img, .qr-code img").first
-                if await qr_img.count() > 0 and await qr_img.is_visible():
-                    dest = path.parent / f"{path.stem}_{user_code}_qr.png"
-                    await qr_img.screenshot(path=str(dest))
-                    qr_path = str(dest)
+            try:
+                qr_btn = page.get_by_text("QRコードを表示").first
+                if await qr_btn.count() > 0 and await qr_btn.is_visible():
+                    await qr_btn.click()
+                    await page.wait_for_timeout(1000)
+
+                    # 本物のQRコードは blob: URL または 150px 以上の正方形画像
+                    # （モーダルの閉じる×アイコンなどの誤取得を防ぐ）
+                    target_img = None
+                    blob_imgs = await page.locator("img[src^='blob:']").all()
+                    for img in blob_imgs:
+                        if await img.is_visible():
+                            box = await img.bounding_box()
+                            if box and box["width"] >= 100 and box["height"] >= 100:
+                                target_img = img
+                                break
+
+                    if not target_img:
+                        # フォールバック: 画面上の大きな可視画像を探索
+                        all_imgs = await page.locator("img").all()
+                        for img in all_imgs:
+                            if await img.is_visible():
+                                box = await img.bounding_box()
+                                if box and box["width"] >= 150 and box["height"] >= 150:
+                                    target_img = img
+                                    break
+
+                    if target_img:
+                        dest = path.parent / f"{path.stem}_{user_code}_qr.png"
+                        await target_img.screenshot(path=str(dest))
+                        qr_path = str(dest)
+            except Exception:
+                pass
 
         await page.close()
 

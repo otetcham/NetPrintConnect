@@ -149,21 +149,44 @@ async def upload_to_seven(
         if save_qr:
             try:
                 # アップロード完了ポップアップ（モーダル）が表示されている場合、閉じるボタンをクリック
-                close_modal_btn = page.locator("button:has-text('閉じる'), .ReactModalPortal button").first
+                close_modal_btn = page.locator("button:has-text('閉じる')").first
                 if await close_modal_btn.count() > 0 and await close_modal_btn.is_visible():
                     await close_modal_btn.click()
                     await page.wait_for_timeout(500)
 
-                # 「コンビニでプリントする」ボタンを押すとQRコードが表示される
+                # 「コンビニでプリントする」ボタンを押すと別タブ（/web/qr）が開く
                 show_qr_btn = page.locator("button:has-text('コンビニでプリントする')").first
                 if await show_qr_btn.count() > 0 and await show_qr_btn.is_visible():
-                    await show_qr_btn.click(force=True, timeout=5000)
-                    await page.wait_for_timeout(800)
-                    qr_canvas_or_img = page.locator("canvas, img[alt*='QR'], img[src*='data:image']").first
-                    if await qr_canvas_or_img.count() > 0 and await qr_canvas_or_img.is_visible():
+                    async with context.expect_page(timeout=10000) as new_page_info:
+                        await show_qr_btn.click()
+                    qr_page = await new_page_info.value
+                    await qr_page.wait_for_load_state("domcontentloaded")
+                    await qr_page.wait_for_timeout(1000)
+
+                    # QRコード画像 (blob: URL または 100px以上の正方形画像)
+                    target_img = None
+                    blob_imgs = await qr_page.locator("img[src^='blob:']").all()
+                    for img in blob_imgs:
+                        if await img.is_visible():
+                            box = await img.bounding_box()
+                            if box and box["width"] >= 100 and box["height"] >= 100:
+                                target_img = img
+                                break
+
+                    if not target_img:
+                        for img in await qr_page.locator("img").all():
+                            if await img.is_visible():
+                                box = await img.bounding_box()
+                                if box and box["width"] >= 150 and box["height"] >= 150:
+                                    target_img = img
+                                    break
+
+                    if target_img:
                         dest = path.parent / f"{path.stem}_{code}_qr.png"
-                        await qr_canvas_or_img.screenshot(path=str(dest))
+                        await target_img.screenshot(path=str(dest))
                         qr_path = str(dest)
+
+                    await qr_page.close()
             except Exception:
                 # QRコード取得に失敗しても予約番号自体は保持して正常終了する
                 pass
