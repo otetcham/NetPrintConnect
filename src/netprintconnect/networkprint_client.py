@@ -8,13 +8,17 @@ async def upload_to_networkprint(
     browser: Browser | None = None,
     save_qr: bool = True,
     paper_size: str = "A4",
-    color_mode: str | None = None
+    color_mode: str | None = None,
+    user_id: str | None = None,
+    password: str | None = None
 ) -> PrintJobResult:
     """
     ファミリーマート・ローソン・ポプラグループ・ミニストップ系
-    SHARP ネットワークプリント（会員登録なし / Lite）へアップロード
+    SHARP ネットワークプリントへアップロード（会員ログインまたはゲスト/Lite）
     :param paper_size: 用紙サイズ (A4, B5, B4, A3 等)
     :param color_mode: カラーモード (白黒/カラーはコンビニマルチコピー機側でも選択可能)
+    :param user_id: 会員ID/メールアドレス (指定時は会員ログインモード)
+    :param password: 会員パスワード
     """
     path = Path(file_path).resolve()
     if not path.exists():
@@ -45,6 +49,75 @@ async def upload_to_networkprint(
             locale="ja-JP"
         )
         page = await context.new_page()
+
+        # ==================== 会員ログインモード ====================
+        if user_id and password:
+            await page.goto("https://networkprint.ne.jp/sharp_netprint/ja/top.aspx", timeout=60000, wait_until="domcontentloaded")
+            await page.locator("#txtId").fill(user_id)
+            await page.locator("#txtPw").fill(password)
+            await page.locator("#lnkLogin").click()
+            await page.wait_for_timeout(2000)
+
+            # 認証成否チェック
+            error_modal = page.locator(".ui-dialog:visible, .modal:visible, text=ログインできませんでした")
+            if await error_modal.count() > 0 and await error_modal.first.is_visible():
+                modal_text = await error_modal.first.inner_text()
+                raise RuntimeError(f"ネットワークプリントのログインに失敗しました: {modal_text.strip()[:100]}")
+
+            if "top.aspx" in page.url:
+                body_t = await page.locator("body").inner_text()
+                if "ログインできませんでした" in body_t:
+                    raise RuntimeError("ネットワークプリントのログインに失敗しました: ログイン名またはパスワードをご確認ください。")
+
+            # ログイン成功後、ファイル登録ページまたはマイボックスへ遷移
+            # マイページで固定ユーザー番号を取得
+            user_code = None
+            page_text = await page.locator("body").inner_text()
+            code_match = re.search(r"ユーザー番号\s*[:：]?\s*([A-Z0-9]{10})", page_text)
+            if code_match:
+                user_code = code_match.group(1).strip()
+
+            # ファイル登録画面へのリンク（文書プリント登録）
+            doc_btn = page.locator("a:has-text('文書を登録'), button:has-text('文書を登録'), a:has-text('ファイルを登録')").first
+            if await doc_btn.count() > 0 and await doc_btn.is_visible():
+                await doc_btn.click()
+                await page.wait_for_timeout(1000)
+
+            file_input = page.locator("input[type='file']").first
+            if await file_input.count() > 0:
+                await file_input.set_input_files(str(path))
+                await page.wait_for_timeout(1500)
+
+                # 登録実行
+                reg_btn = page.locator("#registerButton, input[value*='登録'], button:has-text('登録')").first
+                if await reg_btn.count() > 0:
+                    await reg_btn.click()
+                    await page.wait_for_timeout(2000)
+
+            # ユーザー番号が未取得なら再度探索
+            if not user_code:
+                page_text = await page.locator("body").inner_text()
+                m = re.search(r"\b([A-Z0-9]{10})\b", page_text)
+                if m:
+                    user_code = m.group(1).strip()
+
+            from .pricing import estimate_cost
+            cost = estimate_cost("networkprint", paper_size or "A4", color_mode, None)
+
+            return PrintJobResult(
+                service="networkprint",
+                service_name="ネットワークプリント (ファミマ/ローソン等・会員)",
+                file_name=path.name,
+                print_code=user_code or "会員マイボックス登録済",
+                expires_at="最長30日間 (会員有効期限)",
+                page_count=None,
+                color_mode=color_mode or "店舗選択",
+                estimated_cost=cost,
+                qr_code_path=None,
+                details=f"会員マイボックスに登録されました。ご自身のユーザー番号({user_code})でマルチコピー機から印刷できます。"
+            )
+
+        # ==================== ゲストモード (Lite) ====================
         # 1. 登録開始ページへアクセス
         await page.goto("https://networkprint.ne.jp/Lite/start?lang=jajp", timeout=60000, wait_until="domcontentloaded")
         

@@ -9,13 +9,17 @@ async def upload_to_seven(
     save_qr: bool = True,
     paper_size: str | None = None,
     color_mode: str | None = None,
-    pin: str | None = None
+    pin: str | None = None,
+    user_id: str | None = None,
+    password: str | None = None
 ) -> PrintJobResult:
     """
-    セブン-イレブン かんたんnetprint（会員登録不要）へアップロード
+    セブン-イレブン ネットプリントへアップロード（会員ログインまたはゲスト/かんたんnetprint）
     :param paper_size: 用紙サイズ ('A4', 'B5', 'B4', 'A3', 'フォト用紙 L', 'はがき' 等)
     :param color_mode: カラーモード ('color': カラー, 'mono': 白黒)
     :param pin: 暗証番号（数字4桁）
+    :param user_id: 会員ユーザーID / メールアドレス
+    :param password: 会員パスワード
     """
     path = Path(file_path).resolve()
     if not path.exists():
@@ -50,6 +54,70 @@ async def upload_to_seven(
             locale="ja-JP"
         )
         page = await context.new_page()
+
+        # ==================== 会員ログインモード ====================
+        if user_id and password:
+            await page.goto("https://www.printing.ne.jp/usr/web/NPCM0010.seam", timeout=60000, wait_until="domcontentloaded")
+            await page.locator("input[name='NPCM0010:userIdOrMailads-txt']").fill(user_id)
+            await page.locator("input[name='NPCM0010:password-pwd']").fill(password)
+            await page.locator("input[name='NPCM0010:login-btn']").click()
+            await page.wait_for_timeout(2000)
+
+            # 認証エラー判定
+            body_text = await page.locator("body").inner_text()
+            if "NPCM0010.seam" in page.url or "ログインできません" in body_text or "正しくありません" in body_text:
+                error_elem = page.locator(".errorMessage, .errors, [class*='error']")
+                err_detail = "ユーザーIDまたはパスワードをご確認ください。"
+                if await error_elem.count() > 0:
+                    err_detail = (await error_elem.first.inner_text()).strip()
+                raise RuntimeError(f"ネットプリント(セブン)のログインに失敗しました: {err_detail}")
+
+            # ログイン後、普通紙プリント登録画面へ遷移
+            # メニューリンクから「普通紙プリント登録」をクリック
+            reg_link = page.locator("a:has-text('普通紙プリント'), a:has-text('文書プリント')").first
+            if await reg_link.count() > 0:
+                await reg_link.click()
+                await page.wait_for_timeout(1000)
+
+            file_input = page.locator("input[type='file']").first
+            if await file_input.count() > 0:
+                await file_input.set_input_files(str(path))
+                await page.wait_for_timeout(1000)
+
+            # 登録ボタン
+            sub_btn = page.locator("input[type='submit'][value*='登録'], button:has-text('登録')").first
+            if await sub_btn.count() > 0:
+                await sub_btn.click()
+                await page.wait_for_timeout(2000)
+
+            # 予約番号の抽出
+            page_t = await page.locator("body").inner_text()
+            code = None
+            code_m = re.search(r"プリント予約番号[：:]\s*([A-Z0-9]{8})", page_t)
+            if code_m:
+                code = code_m.group(1).strip()
+            else:
+                m = re.search(r"\b([A-Z0-9]{8})\b", page_t)
+                if m:
+                    code = m.group(1).strip()
+
+            from .pricing import estimate_cost
+            cost = estimate_cost("seven", paper_size or "A4", color_mode, None)
+
+            return PrintJobResult(
+                service="seven",
+                service_name="ネットプリント (セブン-イレブン・会員)",
+                file_name=path.name,
+                print_code=code or "会員マイページ登録済",
+                expires_at="最長7日間 (会員有効期限)",
+                page_count=None,
+                color_mode=color_mode or "店舗選択",
+                estimated_cost=cost,
+                qr_code_path=None,
+                details="セブン-イレブンのマルチコピー機で「ネットプリント」を選び、予約番号を入力してください。"
+            )
+
+        # ==================== ゲストモード (かんたんnetprint) ====================
         # 1. かんたんnetprint Webページへアクセス
         await page.goto("https://lite.printing.ne.jp/web", timeout=60000, wait_until="domcontentloaded")
         await page.wait_for_timeout(500)

@@ -49,12 +49,15 @@ def cli(ctx):
     help="暗証番号 (4桁数字、セブン-イレブンのみ対応)"
 )
 @click.option("--no-qr", is_flag=True, default=False, help="QRコード画像の保存をスキップ")
+@click.option("--user", "-u", default=None, help="会員ユーザー名 / メールアドレス (環境変数: NETWORKPRINT_USER / SEVEN_USER)")
+@click.option("--password", "-P", default=None, help="会員パスワード (環境変数: NETWORKPRINT_PASSWORD / SEVEN_PASSWORD)")
 @click.option("--json-output", is_flag=True, default=False, help="結果をJSON形式で標準出力に出力（AI・スクリプト連携用）")
-def upload_command(file_paths: tuple[Path, ...], target: str, paper: str, color: str | None, pin: str | None, no_qr: bool, json_output: bool):
+def upload_command(file_paths: tuple[Path, ...], target: str, paper: str, color: str | None, pin: str | None, no_qr: bool, user: str | None, password: str | None, json_output: bool):
     """指定したファイル（単一または複数）をコンビニプリントにアップロードし、予約番号を発行します。"""
-    asyncio.run(_run_upload_all(file_paths, target, paper_size=paper, color_mode=color, pin=pin, save_qr=not no_qr, json_output=json_output))
+    asyncio.run(_run_upload_all(file_paths, target, paper_size=paper, color_mode=color, pin=pin, save_qr=not no_qr, user=user, password=password, json_output=json_output))
 
-async def _run_upload_all(file_paths: tuple[Path, ...], target: str, paper_size: str, color_mode: str | None, pin: str | None, save_qr: bool, json_output: bool):
+async def _run_upload_all(file_paths: tuple[Path, ...], target: str, paper_size: str, color_mode: str | None, pin: str | None, save_qr: bool, user: str | None, password: str | None, json_output: bool):
+    import os
     all_results: list[PrintJobResult] = []
     all_errors: list[dict] = []
 
@@ -63,15 +66,21 @@ async def _run_upload_all(file_paths: tuple[Path, ...], target: str, paper_size:
             console.print(f"[bold cyan]📁 ファイル:[/bold cyan] {file_path.resolve()}")
             console.print(f"[bold cyan]対象サービス:[/bold cyan] {target} | [bold cyan]サイズ:[/bold cyan] {paper_size}" + 
                           (f" | [bold cyan]カラー:[/bold cyan] {color_mode}" if color_mode else "") +
-                          (f" | [bold cyan]暗証番号:[/bold cyan] {pin}" if pin else "") + "\n")
+                          (f" | [bold cyan]暗証番号:[/bold cyan] {pin}" if pin else "") +
+                          (f" | [bold cyan]会員モード:[/bold cyan] 有効" if (user or os.environ.get("NETWORKPRINT_USER") or os.environ.get("SEVEN_USER")) else "") + "\n")
 
         tasks = []
         if target in ["all", "networkprint"]:
             if pin:
                 console.print("[dim yellow]※ ネットワークプリント (ファミマ/ローソン) はゲスト暗証番号非対応のため、PINはセブン-イレブンにのみ適用されます。[/dim yellow]")
-            tasks.append(("networkprint", upload_to_networkprint(file_path, save_qr=save_qr, paper_size=paper_size, color_mode=color_mode)))
+            np_user = user or os.environ.get("NETWORKPRINT_USER")
+            np_pass = password or os.environ.get("NETWORKPRINT_PASSWORD")
+            tasks.append(("networkprint", upload_to_networkprint(file_path, save_qr=save_qr, paper_size=paper_size, color_mode=color_mode, user_id=np_user, password=np_pass)))
+
         if target in ["all", "seven"]:
-            tasks.append(("seven", upload_to_seven(file_path, save_qr=save_qr, paper_size=paper_size, color_mode=color_mode, pin=pin)))
+            seven_user = user or os.environ.get("SEVEN_USER")
+            seven_pass = password or os.environ.get("SEVEN_PASSWORD")
+            tasks.append(("seven", upload_to_seven(file_path, save_qr=save_qr, paper_size=paper_size, color_mode=color_mode, pin=pin, user_id=seven_user, password=seven_pass)))
 
         for svc_name, task in tasks:
             with console.status(f"[bold green]{svc_name} にアップロード処理中...[/bold green]", spinner="dots") if not json_output else nullcontext():

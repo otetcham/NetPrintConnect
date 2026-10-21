@@ -13,7 +13,9 @@ async def upload_document_for_print(
     paper_size: str = "A4",
     color_mode: str | None = None,
     pin: str | None = None,
-    save_qr: bool = True
+    save_qr: bool = True,
+    user_id: str | None = None,
+    password: str | None = None
 ) -> str:
     """
     指定したPDF・画像等のファイルをコンビニ印刷（ネットワークプリント / ネットプリント）にヘッドレスでアップロードし、
@@ -25,7 +27,10 @@ async def upload_document_for_print(
     :param color_mode: カラー設定 ('color': カラー, 'mono': 白黒)
     :param pin: 暗証番号 (数字4桁、セブン-イレブン対応)
     :param save_qr: QRコード画像をファイルと同じディレクトリに保存するかどうか
+    :param user_id: 会員ID/メールアドレス (未指定時はゲスト利用)
+    :param password: 会員パスワード
     """
+    import os
     path = Path(file_path).resolve()
     if not path.exists():
         return f"エラー: 指定されたファイルが見つかりません: {file_path}"
@@ -35,7 +40,9 @@ async def upload_document_for_print(
 
     if target in ["all", "networkprint"]:
         try:
-            res_np = await upload_to_networkprint(path, save_qr=save_qr, paper_size=paper_size, color_mode=color_mode)
+            np_user = user_id or os.environ.get("NETWORKPRINT_USER")
+            np_pass = password or os.environ.get("NETWORKPRINT_PASSWORD")
+            res_np = await upload_to_networkprint(path, save_qr=save_qr, paper_size=paper_size, color_mode=color_mode, user_id=np_user, password=np_pass)
             results.append(
                 f"【{res_np.service_name}】\n"
                 f"・ユーザー番号: {res_np.print_code}\n"
@@ -50,7 +57,9 @@ async def upload_document_for_print(
 
     if target in ["all", "seven"]:
         try:
-            res_seven = await upload_to_seven(path, save_qr=save_qr, paper_size=paper_size, color_mode=color_mode, pin=pin)
+            seven_user = user_id or os.environ.get("SEVEN_USER")
+            seven_pass = password or os.environ.get("SEVEN_PASSWORD")
+            res_seven = await upload_to_seven(path, save_qr=save_qr, paper_size=paper_size, color_mode=color_mode, pin=pin, user_id=seven_user, password=seven_pass)
             results.append(
                 f"【{res_seven.service_name}】\n"
                 f"・プリント予約番号: {res_seven.print_code}\n"

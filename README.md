@@ -48,16 +48,37 @@ uv run python -m netprintconnect.cli upload secret.pdf --target seven --color mo
 - `-p, --paper [A4|B5|B4|A3]`: 用紙サイズ指定（デフォルト: `A4`）
 - `-c, --color [color|mono]`: カラーモード指定
 - `--pin [4桁数字]`: 印刷用暗証番号（セブン-イレブン対応）
+- `-u, --user [ID/Mail]`: 会員ログイン用ユーザーID/メールアドレス
+- `-P, --password [PASS]`: 会員ログイン用パスワード
 - `--no-qr`: QRコード画像のローカル保存を無効化
 - `--json-output`: スクリプト連携用JSON出力
 
-### 3. JSON出力モード
+### 3. 会員ログインモード（有効期限の延長・マイキャビネット登録）
+未指定時は登録不要のゲストモード（有効期限: セブン翌日/ファミマ約8日間）で動作しますが、認証情報を指定すると会員モードでログインし、**有効期限を最長7日〜30日間に延長**してマイボックスに登録できます。
+
+環境変数を設定しておくと、CLI実行時に自動適用されます。
+```bash
+# ネットワークプリント (ファミマ/ローソン等)
+export NETWORKPRINT_USER="user@example.com"
+export NETWORKPRINT_PASSWORD="your_password"
+
+# ネットプリント (セブン-イレブン)
+export SEVEN_USER="user@example.com"
+export SEVEN_PASSWORD="your_password"
+```
+
+CLIで直接指定することも可能です：
+```bash
+uv run python -m netprintconnect.cli upload document.pdf -u "user@example.com" -P "your_password"
+```
+
+### 4. JSON出力モード
 `--json-output` オプションを指定すると、標準出力に構造化JSONのみを出力します。
 ```bash
 uv run python -m netprintconnect.cli upload document.pdf --json-output
 ```
 
-### 4. 一時ファイルのクリーンアップ
+### 5. 一時ファイルのクリーンアップ
 生成されたQRコード画像（`*_qr.png`）等を一括削除します。
 ```bash
 uv run python -m netprintconnect.cli clean
